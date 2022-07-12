@@ -16,6 +16,10 @@
     "test": "jest"
   },
   "dependencies": {
+    "@octokit/auth-app": "^4.0.4",
+    "jsonwebtoken": "^8.5.1",
+    "node-fetch": "^2.6.7",
+    "octokit": "^2.0.3",
     "probot": "^12.2.4"
   },
   "devDependencies": {

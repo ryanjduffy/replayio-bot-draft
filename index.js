@@ -1,6 +1,11 @@
+const fetch = require("node-fetch");
+const jwt = require("jsonwebtoken");
+const { Octokit, App } = require("octokit");
+const { createAppAuth } = require("@octokit/auth-app");
+
 const BOT_LOGIN = "replayio-bot-draft";
 
-const findComment = async (context, owner, repo, number) => {
+const findComment = async (octokit, owner, repo, number) => {
   let id = null;
   let comment = null;
 
@@ -8,7 +13,7 @@ const findComment = async (context, owner, repo, number) => {
   let cursor = null;
   let visited = 0;
   while(true) {
-    const results = await context.octokit.graphql(`
+    const results = await octokit.graphql(`
       query { 
         repository(owner: "${owner}", name: "${repo}") {
           pullRequest(number: ${number}) {
@@ -67,8 +72,8 @@ const findComment = async (context, owner, repo, number) => {
   return {id, comment};
 };
 
-const addComment = async (context, subjectId) => {
-  return await context.octokit.graphql(`
+const addComment = async (octokit, subjectId) => {
+  return await octokit.graphql(`
     mutation AddComment($body: String!, $subjectId: ID!) {
       addComment(input: {
         subjectId: $subjectId,
@@ -88,8 +93,8 @@ const addComment = async (context, subjectId) => {
   });
 };
 
-const updateComment = async (context, commentId) => {
-  return await context.octokit.graphql(`
+const updateComment = async (octokit, commentId) => {
+  return await octokit.graphql(`
     mutation UpdateComment($body: String!, $commentId: ID!) {
       updateIssueComment(input: {
         id: $commentId,
@@ -109,12 +114,12 @@ const updateComment = async (context, commentId) => {
   });
 };
 
-const handlePullRequest = async (context) => {
+const addOrUpdateComment = async(octokit, owner, name, number) => {
   const {id, comment} = await findComment(
-    context,
-    context.payload.repository.owner.login,
-    context.payload.repository.name,
-    context.payload.pull_request.number
+    octokit,
+    owner,
+    name,
+    number
   );
 
   if (!id) {
@@ -122,13 +127,92 @@ const handlePullRequest = async (context) => {
   }
 
   if (!comment) {
-    await addComment(context, id);
+    return await addComment(octokit, id);
   } else {
-    await updateComment(context, comment);
+    return await updateComment(octokit, comment);
   }
 }
 
+const handlePullRequest = async (context) => {
+  return addOrUpdateComment(
+    octokit,
+    context.payload.repository.owner.login,
+    context.payload.repository.name,
+    context.payload.pull_request.number
+  );
+}
+
+function createToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const token = jwt.sign({
+    iat: now - 60,
+    exp: now + (10 * 60),
+    iss: process.env.APP_ID,
+  }, process.env.PRIVATE_KEY, {
+    algorithm: "RS256"
+  });
+
+  return token;
+}
+
+function getGitHubHeaders(token) {
+  return {
+    Authorization: token ? `token ${token}` : `Bearer ${createToken()}`,
+    Accept: "application/vnd.github+json",
+  };
+}
+
+function getOctokit(installationId) {
+  return new Octokit({
+    authStrategy: createAppAuth,
+    auth: {
+      appId: process.env.APP_ID,
+      privateKey: process.env.PRIVATE_KEY,
+      installationId,
+    },
+  });
+}
+
+async function getRepoOctokit(owner, repo) {
+  const installations = await fetch("https://api.github.com/app/installations", {
+    headers: getGitHubHeaders()
+  }).then(resp => resp.json());
+
+  const install = installations.find(i => i.account.login === owner);
+    
+  if (install) {
+    const installationId = install.id;
+
+    const token = await fetch(install.access_tokens_url, {
+      method: "POST",
+      headers: getGitHubHeaders()
+    }).then(resp => resp.json());
+
+    const repos = await fetch(install.repositories_url, {
+      headers: getGitHubHeaders(token.token),
+    }).then(resp => resp.json());
+
+    const repository = repos.repositories.find(r => r.name === repo);
+
+    if (repository) {
+      return getOctokit(installationId);
+    }
+  }
+
+  return null;
+}
+
 module.exports = (app) => {
+  const owner = "ryanjduffy";
+  const repo = "test-pw";
+  const pullRequestNumber = 11;
+
+  getRepoOctokit(owner, repo).then(octokit => {
+    if (!octokit) console.error("failed to find repo");
+
+    return addOrUpdateComment(octokit, owner, repo, pullRequestNumber);
+  }).then(console.log);
+  
   app.on("pull_request.reopened", handlePullRequest);
   app.on("pull_request.opened", handlePullRequest);
 };
