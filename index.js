@@ -213,6 +213,6 @@ module.exports = (app) => {
     return addOrUpdateComment(octokit, owner, repo, pullRequestNumber);
   }).then(console.log);
   
-  app.on("pull_request.reopened", handlePullRequest);
-  app.on("pull_request.opened", handlePullRequest);
+  // app.on("pull_request.reopened", handlePullRequest);
+  // app.on("pull_request.opened", handlePullRequest);
 };
