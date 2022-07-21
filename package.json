@@ -1,18 +1,20 @@
 {
   "name": "replayio-bot-draft",
   "version": "1.0.0",
+  "main": "./src/index.js",
   "private": true,
   "description": "A Probot app",
   "author": "Ryan Duffy",
   "license": "ISC",
-  "homepage": "https://github.com//",
+  "homepage": "https://github.com/",
   "keywords": [
     "probot",
     "github",
     "probot-app"
   ],
   "scripts": {
-    "start": "probot run ./index.js",
+    "start": "node .",
+    "probot": "probot run ./src/bot.js",
     "test": "jest"
   },
   "dependencies": {
