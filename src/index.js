@@ -10,7 +10,7 @@ const env = require("dotenv");
 
 const bot = require("./bot");
 const { getRepoOctokit } = require("./octokit");
-const { addOrUpdateComment } = require("./comment");
+const { testRunUpdateComment } = require("./comment");
 
 env.config();
 const app = express();
@@ -34,56 +34,70 @@ const probot = new Probot({
   appId: process.env.APP_ID,
   privateKey: process.env.PRIVATE_KEY,
   secret: process.env.WEBHOOK_SECRET,
-})
+});
 
-app.get("/", (req, res) => res.send("App is working"));
-app.use(createNodeMiddleware(bot, {probot}));
-app.post("/event", express.json({ limit: "50mb" }),
-async (req, res) => {
-  const event = req.body?.event || {};
-  const op = event.op;
+async function handleTestRunUpdate(req, res, event) {
   const {old, new: current} = event.data || {};
 
   if (!current.repository || !current.merge_id) {
     // no PR associated with the test run
     console.log("No PR associated with test run", current.id);
-    res.sendStatus(200);
-
-    return;
+    return 0;
   }
 
   let prNumber = Number.parseInt(current.merge_id);
   if (isNaN(prNumber)) {
     console.log("merge_id is not a number");
-    res.sendStatus(400);
-
-    return;
+    return -1;
   }
 
   const [owner, repo] = current.repository.split("/");
   if (!owner || !repo) {
     console.log("Repository", current.repository, "was invalid");
-    res.sendStatus(400);
 
-    return;
-  }
-
-  let comment = current.passed_count + " / " + current.failed_count
-  if (op === "INSERT") {
-    // new test run
-    comment = "New: " + comment;
-  } else if (old.status !== current.status) {
-    // pending -> complete
-    comment = current.status + ": " + comment;
-  } else if (old.passed_count !== current.passed_count || old.failed_count !== current.failed_count) {
-    // in progress update
-    comment = "Update: " + comment;
+    return -1;
   }
 
   const octokit = await getRepoOctokit(owner, repo);
-  await addOrUpdateComment(octokit, owner, repo, prNumber, comment);
+  await testRunUpdateComment(octokit, owner, repo, prNumber, event);
+}
+  
 
-  res.sendStatus(200);
+app.get("/", (req, res) => res.send("App is working"));
+app.use(createNodeMiddleware(bot, {probot}));
+app.post("/event", express.json({ limit: "50mb" }),
+async (req, res) => {
+  let status = 200;
+  const sendStatus = (n) => {
+    status = n;
+    res.sendStatus(n);
+  }
+
+  try {
+    const event = req.body?.event || {};
+    const name = req.body?.trigger?.name;
+
+    console.group(`>> /event (name: ${name})`);
+
+    let result = 0;
+    if (name === "test_run_update") {
+      result = await handleTestRunUpdate(req, res, event);
+    }
+
+    // non-zero response means an input error
+    if (result) {
+      sendStatus(400);
+    } else {
+      sendStatus(200);
+    }
+  } catch (e) {
+    console.error(e);
+
+    sendStatus(500);
+  } finally {
+    console.groupEnd();
+    console.log(`<< /event (${status})`);
+  }
 });
 
 const port = process.env.PORT || 8081;

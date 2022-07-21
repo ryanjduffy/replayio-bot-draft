@@ -132,9 +132,31 @@ const addOrUpdateComment = async(octokit, owner, name, number, body) => {
   }
 }
 
+const testRunUpdateComment = async (octokit, owner, name, number, event) => {
+  const op = event.op;
+  const {old, new: current} = event.data || {};
+
+  let comment = current.passed_count + " / " + current.failed_count
+  if (op === "INSERT") {
+    // new test run
+    comment = "New: " + comment;
+  } else if (old.status !== current.status) {
+    // pending -> complete
+    comment = current.status + ": " + comment;
+  } else if (old.passed_count !== current.passed_count || old.failed_count !== current.failed_count) {
+    // in progress update
+    comment = "Update: " + comment;
+  }
+
+  if (comment) {
+    await addOrUpdateComment(octokit, owner, name, number, comment)
+  }
+}
+
 module.exports = {
   addOrUpdateComment,
   updateComment,
   findComment,
   addComment,
+  testRunUpdateComment,
 };
